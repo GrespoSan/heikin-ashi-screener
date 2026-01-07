@@ -1,112 +1,120 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
+import finnhub
+from datetime import datetime, timedelta
 import plotly.graph_objects as go
-from datetime import date, timedelta
-import numpy as np
 
+# -------------------------
+# CONFIG STREAMLIT
+# -------------------------
 st.set_page_config(
-    page_title="Heikin Ashi Screener",
-    page_icon="📊",
+    page_title="Heikin Ashi Screener ITA",
+    page_icon="📈",
     layout="wide"
 )
 
-st.title("📊 Screener Heikin Ashi – Inversione Rialzista")
-
+st.title("📊 Screener Heikin Ashi – Titoli Italiani")
 st.markdown("""
-**Condizione di ricerca**
-- 🔴 Heikin Ashi **altro ieri rossa**
+**Pattern di ricerca:**  
+- 🔴 Heikin Ashi **altro ieri rossa**  
 - 🟢 Heikin Ashi **ieri verde**
 """)
 
 # -------------------------
-# DEFAULT SYMBOLS
+# API FINNHUB
 # -------------------------
-SYMBOLS = [
-    "A2A.MI", "AMP.MI", "BAMI.MI", "BC.MI", "BGN.MI", "BMPS.MI", "BPE.MI", "BMED.MI", "BST.MI", "CE.MI", "CPR.MI", "DIA.MI", "ENEL.MI", "ENI.MI", "ERG.MI", "FBK.MI", "GEO.MI", "IG.MI", "INRG.MI", "ISP.MI", "IVG.MI", "LDO.MI", "MB.MI", "MONC.MI", "NEXI.MI", "PRY.MI", "PST.MI", "RACE.MI", "REC.MI", "SFER.MI", "SPM.MI", "STLAM.MI", "STMMI.MI", "TES.MI", "TEN.MI", "TGYM.MI", "TIT.MI", "TRN.MI", "UCG.MI", "UNI.MI"
+API_KEY = "LA_TUA_API_KEY_FIRNHUB"  # <--- inserisci qui la tua API Key
+client = finnhub.Client(api_key=API_KEY)
+
+# -------------------------
+# DEFAULT SYMBOLS ITALIA (Borsa Italiana)
+# -------------------------
+DEFAULT_SYMBOLS = [
+       "A2A.MI", "AMP.MI", "BAMI.MI", "BC.MI", "BGN.MI", "BMPS.MI", "BPE.MI", "BMED.MI", "BST.MI", "CE.MI", "CPR.MI", "DIA.MI", "ENEL.MI", "ENI.MI", "ERG.MI", "FBK.MI", "GEO.MI", "IG.MI", "INRG.MI", "ISP.MI", "IVG.MI", "LDO.MI", "MB.MI", "MONC.MI", "NEXI.MI", "PRY.MI", "PST.MI", "RACE.MI", "REC.MI", "SFER.MI", "SPM.MI", "STLAM.MI", "STMMI.MI", "TES.MI", "TEN.MI", "TGYM.MI", "TIT.MI", "TRN.MI", "UCG.MI", "UNI.MI"
 ]
 
 # -------------------------
-# DATA FETCH
+# UPLOAD FILE OPZIONALE
 # -------------------------
-@st.cache_data(ttl=3600)
-def fetch_all_data(symbols, start, end):
-    try:
-        data = yf.download(symbols, start=start, end=end, group_by='ticker', progress=False)
-        return data
-    except Exception as e:
-        st.error(f"Errore fetch dati: {e}")
-        return None
+uploaded_file = st.file_uploader("Carica file TXT con simboli (uno per riga)", type=['txt'])
+if uploaded_file:
+    file_content = uploaded_file.read().decode('utf-8')
+    symbols = [s.strip().upper() for s in file_content.splitlines() if s.strip()]
+    st.sidebar.success(f"Caricati {len(symbols)} simboli dal file")
+else:
+    symbols = DEFAULT_SYMBOLS
+    st.sidebar.info(f"Analisi su {len(symbols)} simboli predefiniti")
 
 # -------------------------
-# HEIKIN ASHI
+# FUNZIONE HEIKIN ASHI
 # -------------------------
 def heikin_ashi(df):
     ha = df.copy()
     ha['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
-
     ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2]
     for i in range(1, len(df)):
         ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1]) / 2)
-
     ha['HA_Open'] = ha_open
-    ha['HA_High'] = ha[['High', 'HA_Open', 'HA_Close']].max(axis=1)
-    ha['HA_Low'] = ha[['Low', 'HA_Open', 'HA_Close']].min(axis=1)
-
+    ha['HA_High'] = ha[['High','HA_Open','HA_Close']].max(axis=1)
+    ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].min(axis=1)
     return ha
 
 # -------------------------
-# ANALISI
+# FETCH DATI FINNHUB
 # -------------------------
-def analyze_stock(symbol, all_data):
+@st.cache_data(ttl=3600)
+def fetch_stock_data(symbol, days=10):
+    end = datetime.today()
+    start = end - timedelta(days=days)
     try:
-        df = all_data[symbol].copy()
-    except KeyError:
+        res = client.stock_candles(symbol, 'D', int(start.timestamp()), int(end.timestamp()))
+        df = pd.DataFrame({
+            'Open': res['o'],
+            'High': res['h'],
+            'Low': res['l'],
+            'Close': res['c'],
+            'Volume': res['v']
+        }, index=pd.to_datetime(res['t'], unit='s'))
+        if df.empty:
+            return None
+        return df
+    except Exception as e:
+        st.error(f"Errore fetch {symbol}: {e}")
         return None
 
-    if df.empty or len(df) < 4:
+# -------------------------
+# ANALISI PATTERN
+# -------------------------
+def analyze_symbol(symbol):
+    df = fetch_stock_data(symbol)
+    if df is None or len(df) < 3:
         return None
-
     ha = heikin_ashi(df)
-
     yesterday = ha.iloc[-2]
     day_before = ha.iloc[-3]
-
-    if (yesterday['HA_Close'] > yesterday['HA_Open']) and \
-       (day_before['HA_Close'] < day_before['HA_Open']):
-        return {
-            "symbol": symbol,
-            "ha": ha
-        }
+    if yesterday['HA_Close'] > yesterday['HA_Open'] and day_before['HA_Close'] < day_before['HA_Open']:
+        return {"symbol": symbol, "ha": ha}
     return None
 
 # -------------------------
 # RUN SCREENER
 # -------------------------
-end = date.today() + timedelta(days=1)
-start = end - timedelta(days=15)
-
-with st.spinner("Analisi in corso..."):
-    all_data = fetch_all_data(SYMBOLS, start, end)
-    results = []
-    if all_data is not None:
-        for s in SYMBOLS:
-            r = analyze_stock(s, all_data)
-            if r:
-                results.append(r)
+results = []
+with st.spinner(f"Analisi in corso per {len(symbols)} titoli..."):
+    for s in symbols:
+        r = analyze_symbol(s)
+        if r:
+            results.append(r)
 
 # -------------------------
 # RISULTATI
 # -------------------------
 if results:
-    st.success(f"✅ Trovati {len(results)} titoli")
-
+    st.success(f"✅ Trovati {len(results)} titoli con inversione rialzista")
     df_results = pd.DataFrame({"Simbolo": [r["symbol"] for r in results]})
     st.dataframe(df_results, use_container_width=True)
 
-    # -------------------------
-    # SELEZIONE GRAFICO
-    # -------------------------
+    # GRAFICO HEIKIN ASHI
     selected = st.selectbox("Seleziona un titolo per il grafico Heikin Ashi", df_results["Simbolo"])
     selected_data = next(r for r in results if r["symbol"] == selected)
     ha = selected_data["ha"].tail(30)
@@ -122,7 +130,6 @@ if results:
         decreasing_line_color='red',
         name="Heikin Ashi"
     ))
-    # Aggiungi volume come barre
     if 'Volume' in ha.columns:
         fig.add_trace(go.Bar(
             x=ha.index,
@@ -142,7 +149,6 @@ if results:
         hovermode='x unified'
     )
     st.plotly_chart(fig, use_container_width=True)
-
 else:
     st.warning("❌ Nessun titolo soddisfa il pattern Heikin Ashi")
 
@@ -156,6 +162,4 @@ with st.expander("ℹ️ Logica del Pattern"):
     - Candela verde successiva → possibile ripartenza
     - Filtra rumore di mercato rispetto alle candele classiche
     """)
-
-st.markdown("---")
-st.caption("Dati Yahoo Finance • Analisi Heikin Ashi")
+st.caption("Dati forniti da Finnhub • Analisi Heikin Ashi")
