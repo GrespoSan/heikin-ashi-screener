@@ -68,7 +68,7 @@ else:
 def heikin_ashi(df):
     required_cols = ['Open', 'High', 'Low', 'Close']
 
-    # Controlla se tutte le colonne esistono
+    # Controlla se tutte le colonne richieste esistono
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         return None  # ignora ticker senza colonne complete
@@ -91,7 +91,7 @@ def heikin_ashi(df):
     ha['HA_High'] = ha[['High','HA_Open','HA_Close']].max(axis=1)
     ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].min(axis=1)
 
-    return ha if not ha.empty else None
+    return ha
 
 # -------------------------
 # Fetch sicuro dati da Yahoo
