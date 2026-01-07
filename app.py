@@ -35,13 +35,9 @@ def heikin_ashi(df):
         ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1])/2)
     ha['HA_Open'] = ha_open
 
-    ha['HA_High'] = ha[['HA_Open','HA_Close']].copy()
-    ha['HA_High'] = ha['HA_High'].join(df['High'])
-    ha['HA_High'] = ha[['HA_Open','HA_Close','High']].max(axis=1)
-
-    ha['HA_Low'] = ha[['HA_Open','HA_Close']].copy()
-    ha['HA_Low'] = ha['HA_Low'].join(df['Low'])
-    ha['HA_Low'] = ha[['HA_Open','HA_Close','Low']].min(axis=1)
+    # Corrected: use df['High'] and df['Low'] instead of trying to get them from ha
+    ha['HA_High'] = ha[['HA_Open','HA_Close']].join(df['High']).max(axis=1)
+    ha['HA_Low'] = ha[['HA_Open','HA_Close']].join(df['Low']).min(axis=1)
 
     ha['Volume'] = df['Volume'] if 'Volume' in df.columns else 0
     return ha
@@ -106,7 +102,7 @@ if results:
         name='Heikin Ashi'
     ))
 
-    if 'Volume' in ha.columns:
+    if 'Volume' in ha.columns and ha['Volume'].sum() > 0:
         fig.add_trace(go.Bar(
             x=ha.index,
             y=ha['Volume'],
