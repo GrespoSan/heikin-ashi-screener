@@ -1,12 +1,8 @@
 import streamlit as st
 import pandas as pd
-import os
 import finnhub
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
-
-API_KEY = "d5f3le9r01qvseltqej0d5f3le9r01qvseltqejg"
-client = finnhub.Client(api_key=API_KEY)
 
 # -------------------------
 # CONFIG STREAMLIT
@@ -27,14 +23,19 @@ st.markdown("""
 # -------------------------
 # API FINNHUB
 # -------------------------
-API_KEY = "LA_TUA_API_KEY_FIRNHUB"  # <--- inserisci qui la tua API Key
+API_KEY = "d5f3le9r01qvseltqej0d5f3le9r01qvseltqejg"  # <-- inserisci qui la tua API Key Finnhub
 client = finnhub.Client(api_key=API_KEY)
 
 # -------------------------
 # DEFAULT SYMBOLS ITALIA (Borsa Italiana)
 # -------------------------
 DEFAULT_SYMBOLS = [
-       "A2A.MI", "AMP.MI", "BAMI.MI", "BC.MI", "BGN.MI", "BMPS.MI", "BPE.MI", "BMED.MI", "BST.MI", "CE.MI", "CPR.MI", "DIA.MI", "ENEL.MI", "ENI.MI", "ERG.MI", "FBK.MI", "GEO.MI", "IG.MI", "INRG.MI", "ISP.MI", "IVG.MI", "LDO.MI", "MB.MI", "MONC.MI", "NEXI.MI", "PRY.MI", "PST.MI", "RACE.MI", "REC.MI", "SFER.MI", "SPM.MI", "STLAM.MI", "STMMI.MI", "TES.MI", "TEN.MI", "TGYM.MI", "TIT.MI", "TRN.MI", "UCG.MI", "UNI.MI"
+    "A2A:MI", "AMP:MI", "BAMI:MI", "BC:MI", "BGN:MI", "BMPS:MI", "BPE:MI",
+    "BMED:MI", "BST:MI", "CE:MI", "CPR:MI", "DIA:MI", "ENEL:MI", "ENI:MI",
+    "ERG:MI", "FBK:MI", "GEO:MI", "IG:MI", "INRG:MI", "ISP:MI", "IVG:MI",
+    "LDO:MI", "MB:MI", "MONC:MI", "NEXI:MI", "PRY:MI", "PST:MI", "RACE:MI",
+    "REC:MI", "SFER:MI", "SPM:MI", "STLAM:MI", "STMMI:MI", "TES:MI", "TEN:MI",
+    "TGYM:MI", "TIT:MI", "TRN:MI", "UCG:MI", "UNI:MI"
 ]
 
 # -------------------------
@@ -43,7 +44,7 @@ DEFAULT_SYMBOLS = [
 uploaded_file = st.file_uploader("Carica file TXT con simboli (uno per riga)", type=['txt'])
 if uploaded_file:
     file_content = uploaded_file.read().decode('utf-8')
-    symbols = [s.strip().upper() for s in file_content.splitlines() if s.strip()]
+    symbols = [s.strip().upper().replace('.', ':') for s in file_content.splitlines() if s.strip()]
     st.sidebar.success(f"Caricati {len(symbols)} simboli dal file")
 else:
     symbols = DEFAULT_SYMBOLS
@@ -72,6 +73,8 @@ def fetch_stock_data(symbol, days=10):
     start = end - timedelta(days=days)
     try:
         res = client.stock_candles(symbol, 'D', int(start.timestamp()), int(end.timestamp()))
+        if res['s'] != 'ok':
+            return None
         df = pd.DataFrame({
             'Open': res['o'],
             'High': res['h'],
@@ -153,6 +156,7 @@ if results:
         hovermode='x unified'
     )
     st.plotly_chart(fig, use_container_width=True)
+
 else:
     st.warning("❌ Nessun titolo soddisfa il pattern Heikin Ashi")
 
