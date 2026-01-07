@@ -5,7 +5,7 @@ import finnhub
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 
-API_KEY = os.environ["FINNHUB_API_KEY"]
+API_KEY = "d5f3le9r01qvseltqej0d5f3le9r01qvseltqejg"
 client = finnhub.Client(api_key=API_KEY)
 
 # -------------------------
