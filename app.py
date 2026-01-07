@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from datetime import date, timedelta
 
 # -------------------------
-# Page config
+# Config pagina
 # -------------------------
 st.set_page_config(
     page_title="Heikin Ashi Screener",
@@ -62,6 +62,8 @@ else:
 # -------------------------
 def heikin_ashi(df):
     required_cols = ['Open','High','Low','Close']
+    
+    # Controlla colonne
     if not all(col in df.columns for col in required_cols):
         return None
 
@@ -69,6 +71,7 @@ def heikin_ashi(df):
     if len(df) < 3:
         return None
 
+    # Forza tipo numerico
     for col in required_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     df = df.dropna(subset=required_cols)
@@ -77,17 +80,19 @@ def heikin_ashi(df):
 
     ha = df.copy()
     ha['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
+
     ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2]
     for i in range(1, len(df)):
         ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1]) / 2)
     ha['HA_Open'] = ha_open
-    ha['HA_High'] = ha[['High','HA_Open','HA_Close']].apply(pd.to_numeric, errors='coerce').max(axis=1)
-    ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].apply(pd.to_numeric, errors='coerce').min(axis=1)
+
+    ha['HA_High'] = ha[['High','HA_Open','HA_Close']].max(axis=1)
+    ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].min(axis=1)
 
     return ha if not ha.empty else None
 
 # -------------------------
-# Funzione fetch sicura
+# Fetch sicuro
 # -------------------------
 @st.cache_data
 def fetch_stock_data(symbol, start, end):
@@ -124,7 +129,7 @@ with st.spinner("Analisi in corso..."):
     results = []
     for s in symbols:
         r = analyze_stock(s)
-        if r:
+        if r is not None:
             results.append(r)
 
 # -------------------------
