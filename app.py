@@ -58,13 +58,21 @@ else:
     st.sidebar.info(f"🔍 Uso lista default di {len(DEFAULT_SYMBOLS)} simboli")
 
 # -------------------------
-# Funzioni Heikin Ashi
+# Funzione Heikin Ashi sicura
 # -------------------------
 def heikin_ashi(df):
     required_cols = ['Open','High','Low','Close']
     if not all(col in df.columns for col in required_cols):
         return None
-    if df[required_cols].isna().all().any():
+
+    df = df.dropna(subset=required_cols)
+    if len(df) < 3:
+        return None
+
+    for col in required_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=required_cols)
+    if len(df) < 3:
         return None
 
     ha = df.copy()
@@ -73,10 +81,14 @@ def heikin_ashi(df):
     for i in range(1, len(df)):
         ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1]) / 2)
     ha['HA_Open'] = ha_open
-    ha['HA_High'] = ha[['High','HA_Open','HA_Close']].max(axis=1)
-    ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].min(axis=1)
-    return ha
+    ha['HA_High'] = ha[['High','HA_Open','HA_Close']].apply(pd.to_numeric, errors='coerce').max(axis=1)
+    ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].apply(pd.to_numeric, errors='coerce').min(axis=1)
 
+    return ha if not ha.empty else None
+
+# -------------------------
+# Funzione fetch sicura
+# -------------------------
 @st.cache_data
 def fetch_stock_data(symbol, start, end):
     try:
@@ -87,6 +99,9 @@ def fetch_stock_data(symbol, start, end):
     except:
         return None
 
+# -------------------------
+# Analizza singolo titolo
+# -------------------------
 def analyze_stock(symbol):
     end = date.today() + timedelta(days=1)
     start = end - timedelta(days=15)
