@@ -36,7 +36,11 @@ SYMBOLS = [
 # FUNZIONE HEIKIN ASHI
 # -------------------------
 def heikin_ashi(df):
-    df = df.sort_index()  # ordine cronologico corretto
+    required_cols = ['Open', 'High', 'Low', 'Close']
+    if not all(col in df.columns for col in required_cols):
+        return None
+
+    df = df.sort_index()  # ordine cronologico
     ha = pd.DataFrame(index=df.index)
     ha['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
 
@@ -45,9 +49,9 @@ def heikin_ashi(df):
         ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1]) / 2)
 
     ha['HA_Open'] = ha_open
-    ha['HA_High'] = ha[['High', 'HA_Open', 'HA_Close']].max(axis=1)
-    ha['HA_Low'] = ha[['Low', 'HA_Open', 'HA_Close']].min(axis=1)
-    ha['Volume'] = df['Volume']
+    ha['HA_High'] = ha[['High','HA_Open','HA_Close']].max(axis=1)
+    ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].min(axis=1)
+    ha['Volume'] = df['Volume'] if 'Volume' in df.columns else 0
     return ha
 
 # -------------------------
@@ -75,12 +79,12 @@ def analyze_stock(symbol, all_data):
         return None
 
     ha = heikin_ashi(df)
+    if ha is None or len(ha) < 3:
+        return None
 
-    # Candela di ieri e dell'altro ieri
     yesterday = ha.iloc[-2]
     day_before = ha.iloc[-3]
 
-    # Pattern: rosso → verde
     if day_before['HA_Close'] < day_before['HA_Open'] and yesterday['HA_Close'] > yesterday['HA_Open']:
         return {"symbol": symbol, "ha": ha}
     return None
@@ -108,7 +112,6 @@ if results:
     df_results = pd.DataFrame({"Simbolo": [r["symbol"] for r in results]})
     st.dataframe(df_results, use_container_width=True)
 
-    # Grafico Heikin Ashi
     selected = st.selectbox("Seleziona un titolo per il grafico Heikin Ashi", df_results["Simbolo"])
     selected_data = next(r for r in results if r["symbol"] == selected)
     ha = selected_data["ha"].tail(30)
@@ -125,15 +128,15 @@ if results:
         name="Heikin Ashi"
     ))
 
-    # Volume
-    fig.add_trace(go.Bar(
-        x=ha.index,
-        y=ha['Volume'],
-        name="Volume",
-        marker_color='blue',
-        yaxis="y2",
-        opacity=0.3
-    ))
+    if 'Volume' in ha.columns:
+        fig.add_trace(go.Bar(
+            x=ha.index,
+            y=ha['Volume'],
+            name="Volume",
+            marker_color='blue',
+            yaxis="y2",
+            opacity=0.3
+        ))
 
     fig.update_layout(
         title=f"{selected} – Grafico Heikin Ashi",
@@ -148,15 +151,5 @@ if results:
 else:
     st.warning("❌ Nessun titolo soddisfa il pattern Heikin Ashi")
 
-# -------------------------
-# INFO
-# -------------------------
-with st.expander("ℹ️ Logica del Pattern"):
-    st.markdown("""
-    **Pattern di inversione Heikin Ashi**
-    - Candela rossa → perdita di momentum
-    - Candela verde successiva → possibile ripartenza
-    - Filtra rumore di mercato rispetto alle candele classiche
-    """)
-
+st.markdown("---")
 st.caption("Dati Yahoo Finance • Analisi Heikin Ashi")
