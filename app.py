@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date, timedelta
-import numpy as np
 
 # -------------------------
 # CONFIG STREAMLIT
@@ -22,7 +21,7 @@ st.markdown("""
 """)
 
 # -------------------------
-# SIMBOLI DEFAULT (Borsa Italiana)
+# SIMBOLI DEFAULT ITALIA
 # -------------------------
 DEFAULT_SYMBOLS = [
     "A2A.MI", "AMP.MI", "BAMI.MI", "BC.MI", "BGN.MI", "BMPS.MI", "BPE.MI",
@@ -46,48 +45,42 @@ else:
     st.sidebar.info(f"Analisi su {len(symbols)} simboli predefiniti")
 
 # -------------------------
-# FUNZIONE HEIKIN ASHI
+# CALCOLO HEIKIN ASHI
 # -------------------------
 def heikin_ashi(df):
-    ha = df.copy()
-    ha['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
-
+    df = df.copy()
+    df['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
     ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2]
     for i in range(1, len(df)):
-        ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1]) / 2)
-
-    ha['HA_Open'] = ha_open
-    ha['HA_High'] = ha[['High', 'HA_Open', 'HA_Close']].max(axis=1)
-    ha['HA_Low'] = ha[['Low', 'HA_Open', 'HA_Close']].min(axis=1)
-    return ha
+        ha_open.append((ha_open[i-1] + df['HA_Close'].iloc[i-1]) / 2)
+    df['HA_Open'] = ha_open
+    df['HA_High'] = df[['High', 'HA_Open', 'HA_Close']].max(axis=1)
+    df['HA_Low'] = df[['Low', 'HA_Open', 'HA_Close']].min(axis=1)
+    return df
 
 # -------------------------
-# FETCH DATI YAHOO
+# FETCH DATI YFINANCE
 # -------------------------
 @st.cache_data(ttl=3600)
-def fetch_stock(symbol, start, end):
+def fetch_data(symbol, start, end):
     try:
         df = yf.download(symbol, start=start, end=end, progress=False)
         if df.empty:
             return None
-        return df[['Open', 'High', 'Low', 'Close', 'Volume']]
-    except Exception as e:
-        st.error(f"Errore fetch {symbol}: {e}")
+        return df
+    except:
         return None
 
 # -------------------------
-# ANALISI PATTERN
+# ANALISI INVERSIONE
 # -------------------------
 def analyze_stock(symbol, start, end):
-    df = fetch_stock(symbol, start, end)
+    df = fetch_data(symbol, start, end)
     if df is None or len(df) < 3:
         return None
-
     ha = heikin_ashi(df)
-
     yesterday = ha.iloc[-2]
     day_before = ha.iloc[-3]
-
     if yesterday['HA_Close'] > yesterday['HA_Open'] and day_before['HA_Close'] < day_before['HA_Open']:
         return {"symbol": symbol, "ha": ha}
     return None
@@ -95,10 +88,10 @@ def analyze_stock(symbol, start, end):
 # -------------------------
 # RUN SCREENER
 # -------------------------
-results = []
 end = date.today() + timedelta(days=1)
-start = end - timedelta(days=30)  # prendi almeno 30 giorni per avere Heikin Ashi corrette
+start = end - timedelta(days=15)
 
+results = []
 with st.spinner(f"Analisi in corso per {len(symbols)} titoli..."):
     for s in symbols:
         r = analyze_stock(s, start, end)
@@ -113,7 +106,9 @@ if results:
     df_results = pd.DataFrame({"Simbolo": [r["symbol"] for r in results]})
     st.dataframe(df_results, use_container_width=True)
 
+    # -------------------------
     # GRAFICO HEIKIN ASHI
+    # -------------------------
     selected = st.selectbox("Seleziona un titolo per il grafico Heikin Ashi", df_results["Simbolo"])
     selected_data = next(r for r in results if r["symbol"] == selected)
     ha = selected_data["ha"].tail(30)
@@ -161,4 +156,5 @@ with st.expander("ℹ️ Logica del Pattern"):
     - Candela verde successiva → possibile ripartenza
     - Filtra rumore di mercato rispetto alle candele classiche
     """)
-st.caption("Dati forniti da Yahoo Finance • Analisi Heikin Ashi")
+
+st.caption("Dati Yahoo Finance • Analisi Heikin Ashi")
