@@ -12,6 +12,7 @@ st.set_page_config(
     page_icon="📊",
     layout="wide"
 )
+
 st.title("📊 Screener Heikin Ashi – Inversione Rialzista")
 st.markdown("""
 **Condizione di ricerca**
@@ -20,18 +21,9 @@ st.markdown("""
 """)
 
 # -------------------------
-# Sidebar: caricamento simboli
+# Lista simboli default
 # -------------------------
-st.sidebar.header("📁 Lista Simboli")
-uploaded_file = st.sidebar.file_uploader(
-    "Carica un file TXT con simboli (uno per riga o separati da virgola)",
-    type=['txt']
-)
-
-# -------------------------
-# Lista default simboli
-# -------------------------
-DEFAULT_SYMBOLS = [
+SYMBOLS_DEFAULT = [
     "AAPL","MSFT","AMZN","GOOGL","META","NVDA","TSLA",
     "AMD","NFLX","INTC","IBM","ORCL","CRM","PYPL",
     "JPM","BAC","WFC","GS","V","MA",
@@ -42,41 +34,55 @@ DEFAULT_SYMBOLS = [
 ]
 
 # -------------------------
-# Carica simboli dal file o default
+# Sidebar: caricamento simboli
 # -------------------------
-if uploaded_file:
+st.sidebar.header("Configurazione Simboli")
+uploaded_file = st.sidebar.file_uploader(
+    "Carica file TXT con simboli azionari (uno per riga o separati da virgola)",
+    type=['txt']
+)
+
+if uploaded_file is not None:
     try:
-        content = uploaded_file.read().decode('utf-8')
-        symbols = []
-        for line in content.strip().split('\n'):
+        file_content = uploaded_file.read().decode('utf-8')
+        file_symbols = []
+        for line in file_content.strip().split('\n'):
             line_symbols = [s.strip().upper() for s in line.split(',') if s.strip()]
-            symbols.extend(line_symbols)
-        symbols = list(dict.fromkeys(symbols))  # rimuove duplicati
-        st.sidebar.success(f"✅ Caricati {len(symbols)} simboli dal file")
-        st.sidebar.info(f"Simboli: {', '.join(symbols[:10])}{'...' if len(symbols) > 10 else ''}")
+            file_symbols.extend(line_symbols)
+        SYMBOLS = list(dict.fromkeys(file_symbols))  # rimuove duplicati
+        st.sidebar.success(f"✅ Caricati {len(SYMBOLS)} simboli dal file")
     except Exception as e:
         st.sidebar.error(f"❌ Errore nella lettura del file: {str(e)}")
-        symbols = DEFAULT_SYMBOLS
-        st.sidebar.info(f"🔍 Uso lista default di {len(DEFAULT_SYMBOLS)} simboli")
+        SYMBOLS = SYMBOLS_DEFAULT
 else:
-    symbols = DEFAULT_SYMBOLS
-    st.sidebar.info(f"🔍 Uso lista default di {len(DEFAULT_SYMBOLS)} simboli")
+    SYMBOLS = SYMBOLS_DEFAULT
+    st.sidebar.info(f"🔍 Analisi dei {len(SYMBOLS_DEFAULT)} simboli predefiniti")
 
 # -------------------------
-# Funzione Heikin Ashi sicura
+# Funzione per scaricare dati
+# -------------------------
+@st.cache_data
+def fetch_stock_data(symbol, start, end):
+    try:
+        df = yf.download(symbol, start=start, end=end, progress=False)
+        if df.empty:
+            return None
+        return df
+    except:
+        return None
+
+# -------------------------
+# Heikin Ashi sicuro
 # -------------------------
 def heikin_ashi(df):
-    required_cols = ['Open', 'High', 'Low', 'Close']
-
-    # Controlla se tutte le colonne richieste esistono
+    required_cols = ['Open','High','Low','Close']
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
-        return None  # ignora ticker senza colonne complete
+        return None
 
-    # Converte in numerico e rimuove righe con NaN
-    df[required_cols] = df[required_cols].apply(pd.to_numeric, errors='coerce')
+    for col in required_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
     df = df.dropna(subset=required_cols)
-
     if len(df) < 3:
         return None
 
@@ -94,20 +100,7 @@ def heikin_ashi(df):
     return ha
 
 # -------------------------
-# Fetch sicuro dati da Yahoo
-# -------------------------
-@st.cache_data
-def fetch_stock_data(symbol, start, end):
-    try:
-        df = yf.download(symbol, start=start, end=end, progress=False)
-        if df.empty:
-            return None
-        return df
-    except:
-        return None
-
-# -------------------------
-# Analizza singolo titolo
+# Analisi singolo ticker
 # -------------------------
 def analyze_stock(symbol):
     end = date.today() + timedelta(days=1)
@@ -115,33 +108,39 @@ def analyze_stock(symbol):
     df = fetch_stock_data(symbol, start, end)
     if df is None or len(df) < 4:
         return None
+
     ha = heikin_ashi(df)
     if ha is None or len(ha) < 3:
         return None
+
     yesterday = ha.iloc[-2]
     day_before = ha.iloc[-3]
+
     if yesterday['HA_Close'] > yesterday['HA_Open'] and day_before['HA_Close'] < day_before['HA_Open']:
         return {"symbol": symbol, "ha": ha}
+
     return None
 
 # -------------------------
-# Esegui screener
+# Esecuzione screener
 # -------------------------
 with st.spinner("Analisi in corso..."):
     results = []
-    for s in symbols:
+    for s in SYMBOLS:
         r = analyze_stock(s)
-        if r is not None:
+        if r:
             results.append(r)
 
 # -------------------------
-# Mostra risultati
+# Risultati
 # -------------------------
 if results:
     st.success(f"✅ Trovati {len(results)} titoli")
+
     df_results = pd.DataFrame({"Simbolo":[r["symbol"] for r in results]})
     st.dataframe(df_results, use_container_width=True)
 
+    # Grafico
     selected = st.selectbox("Seleziona un titolo per il grafico Heikin Ashi", df_results["Simbolo"])
     selected_data = next(r for r in results if r["symbol"] == selected)
     ha = selected_data["ha"].tail(30)
