@@ -3,8 +3,17 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date, timedelta
+import io
 
-st.set_page_config(page_title="Heikin Ashi Screener", page_icon="📊", layout="wide")
+# -------------------------
+# CONFIGURAZIONE PAGINA
+# -------------------------
+st.set_page_config(
+    page_title="Heikin Ashi Screener",
+    page_icon="📊",
+    layout="wide"
+)
+
 st.title("📊 Screener Heikin Ashi – Inversione Rialzista")
 st.markdown("""
 **Condizione di ricerca**
@@ -13,9 +22,9 @@ st.markdown("""
 """)
 
 # -------------------------
-# Simboli default
+# SIMBOLI DEFAULT
 # -------------------------
-SYMBOLS_DEFAULT = [
+DEFAULT_SYMBOLS = [
     "AAPL","MSFT","AMZN","GOOGL","META","NVDA","TSLA",
     "AMD","NFLX","INTC","IBM","ORCL","CRM","PYPL",
     "JPM","BAC","WFC","GS","V","MA",
@@ -26,32 +35,28 @@ SYMBOLS_DEFAULT = [
 ]
 
 # -------------------------
-# Sidebar: caricamento simboli
+# UPLOAD SIMBOLI PERSONALIZZATI
 # -------------------------
-st.sidebar.header("Configurazione Simboli")
+st.sidebar.header("Carica Lista Simboli")
 uploaded_file = st.sidebar.file_uploader(
-    "Carica file TXT con simboli azionari (uno per riga o separati da virgola)",
+    "Carica file TXT con simboli (uno per riga o separati da virgola):",
     type=['txt']
 )
 
-if uploaded_file is not None:
-    try:
-        content = uploaded_file.read().decode('utf-8')
-        file_symbols = []
-        for line in content.strip().split('\n'):
-            line_symbols = [s.strip().upper() for s in line.split(',') if s.strip()]
-            file_symbols.extend(line_symbols)
-        SYMBOLS = list(dict.fromkeys(file_symbols))  # rimuove duplicati
-        st.sidebar.success(f"✅ Caricati {len(SYMBOLS)} simboli dal file")
-    except Exception as e:
-        st.sidebar.error(f"❌ Errore nella lettura del file: {str(e)}")
-        SYMBOLS = SYMBOLS_DEFAULT
+if uploaded_file:
+    content = uploaded_file.read().decode('utf-8')
+    # Split per riga e/o virgola
+    symbols = []
+    for line in content.strip().split("\n"):
+        symbols.extend([s.strip().upper() for s in line.split(",") if s.strip()])
+    symbols = list(dict.fromkeys(symbols))  # rimuove duplicati
+    st.sidebar.success(f"✅ Caricati {len(symbols)} simboli dal file")
 else:
-    SYMBOLS = SYMBOLS_DEFAULT
-    st.sidebar.info(f"🔍 Analisi dei {len(SYMBOLS_DEFAULT)} simboli predefiniti")
+    symbols = DEFAULT_SYMBOLS
+    st.sidebar.info(f"🔍 Analisi automatica dei {len(DEFAULT_SYMBOLS)} simboli predefiniti")
 
 # -------------------------
-# Funzione per scaricare dati
+# FETCH DATI AZIONI
 # -------------------------
 @st.cache_data
 def fetch_stock_data(symbol, start, end):
@@ -59,67 +64,70 @@ def fetch_stock_data(symbol, start, end):
         df = yf.download(symbol, start=start, end=end, progress=False)
         if df.empty:
             return None
-        # Converte tutto in numerico sicuro
+        # Forza colonne numeriche
         for col in ['Open','High','Low','Close']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors='coerce')
         df = df.dropna(subset=['Open','High','Low','Close'])
-        if len(df) < 3:
+        if df.empty:
             return None
         return df
     except:
         return None
 
 # -------------------------
-# Heikin Ashi
+# CALCOLO HEIKIN ASHI
 # -------------------------
 def heikin_ashi(df):
-    if df is None or len(df) < 3:
-        return None
     ha = df.copy()
     ha['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
+
     ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2]
     for i in range(1, len(df)):
         ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1]) / 2)
     ha['HA_Open'] = ha_open
+
     ha['HA_High'] = ha[['High','HA_Open','HA_Close']].max(axis=1)
-    ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].min(axis=1)
+    ha['HA_Low']  = ha[['Low','HA_Open','HA_Close']].min(axis=1)
+
     return ha
 
 # -------------------------
-# Analisi singolo ticker
+# ANALISI SINGOLO TITOLO
 # -------------------------
 def analyze_stock(symbol):
     end = date.today() + timedelta(days=1)
-    start = end - timedelta(days=15)
+    start = end - timedelta(days=60)  # periodo sufficiente
     df = fetch_stock_data(symbol, start, end)
-    ha = heikin_ashi(df)
-    if ha is None or len(ha) < 3:
+    if df is None or len(df) < 3:
         return None
+    ha = heikin_ashi(df)
     yesterday = ha.iloc[-2]
     day_before = ha.iloc[-3]
-    if yesterday['HA_Close'] > yesterday['HA_Open'] and day_before['HA_Close'] < day_before['HA_Open']:
+    # Controllo pattern rosso → verde
+    if (day_before['HA_Close'] < day_before['HA_Open']) and (yesterday['HA_Close'] > yesterday['HA_Open']):
         return {"symbol": symbol, "ha": ha}
     return None
 
 # -------------------------
-# Esecuzione screener
+# RUN SCREENER
 # -------------------------
 with st.spinner("Analisi in corso..."):
     results = []
-    for s in SYMBOLS:
+    for s in symbols:
         r = analyze_stock(s)
         if r:
             results.append(r)
 
 # -------------------------
-# Risultati
+# RISULTATI
 # -------------------------
 if results:
     st.success(f"✅ Trovati {len(results)} titoli")
-    df_results = pd.DataFrame({"Simbolo":[r["symbol"] for r in results]})
+
+    df_results = pd.DataFrame({"Simbolo": [r["symbol"] for r in results]})
     st.dataframe(df_results, use_container_width=True)
 
+    # Grafico selezione titolo
     selected = st.selectbox("Seleziona un titolo per il grafico Heikin Ashi", df_results["Simbolo"])
     selected_data = next(r for r in results if r["symbol"] == selected)
     ha = selected_data["ha"].tail(30)
@@ -135,7 +143,22 @@ if results:
         decreasing_line_color='red',
         name="Heikin Ashi"
     ))
-    fig.update_layout(title=f"{selected} – Grafico Heikin Ashi", xaxis_title="Data", yaxis_title="Prezzo", height=600)
+    fig.update_layout(
+        title=f"{selected} – Grafico Heikin Ashi",
+        xaxis_title="Data",
+        yaxis_title="Prezzo",
+        height=600
+    )
     st.plotly_chart(fig, use_container_width=True)
+
+    # Download CSV
+    csv_buffer = io.StringIO()
+    df_results.to_csv(csv_buffer, index=False)
+    st.download_button(
+        "📥 Scarica Risultati (CSV)",
+        csv_buffer.getvalue(),
+        file_name="heikin_ashi_results.csv",
+        mime="text/csv"
+    )
 else:
     st.warning("❌ Nessun titolo soddisfa il pattern Heikin Ashi")
