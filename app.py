@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from datetime import date, timedelta
 
 # -------------------------
-# Page configuration
+# Page config
 # -------------------------
 st.set_page_config(
     page_title="Heikin Ashi Screener",
@@ -37,7 +37,7 @@ DEFAULT_SYMBOLS = [
 ]
 
 # -------------------------
-# Carica simboli dal file o usa default
+# Carica simboli dal file o default
 # -------------------------
 if uploaded_file:
     try:
@@ -61,6 +61,12 @@ else:
 # Funzioni Heikin Ashi
 # -------------------------
 def heikin_ashi(df):
+    required_cols = ['Open','High','Low','Close']
+    if not all(col in df.columns for col in required_cols):
+        return None
+    if df[required_cols].isna().all().any():
+        return None
+
     ha = df.copy()
     ha['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
     ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2]
@@ -88,6 +94,8 @@ def analyze_stock(symbol):
     if df is None or len(df) < 4:
         return None
     ha = heikin_ashi(df)
+    if ha is None or len(ha) < 3:
+        return None
     yesterday = ha.iloc[-2]
     day_before = ha.iloc[-3]
     if yesterday['HA_Close'] > yesterday['HA_Open'] and day_before['HA_Close'] < day_before['HA_Open']:
@@ -130,5 +138,6 @@ if results:
     ))
     fig.update_layout(title=f"{selected} – Grafico Heikin Ashi", xaxis_title="Data", yaxis_title="Prezzo", height=600)
     st.plotly_chart(fig, use_container_width=True)
+
 else:
     st.warning("❌ Nessun titolo soddisfa il pattern Heikin Ashi")
