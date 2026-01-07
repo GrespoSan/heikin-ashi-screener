@@ -1,8 +1,12 @@
 import streamlit as st
 import pandas as pd
+import os
 import finnhub
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
+
+API_KEY = os.environ["FINNHUB_API_KEY"]
+client = finnhub.Client(api_key=API_KEY)
 
 # -------------------------
 # CONFIG STREAMLIT
