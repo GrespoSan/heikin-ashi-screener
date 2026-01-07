@@ -32,12 +32,13 @@ SYMBOLS = [
 ]
 
 # -------------------------
-# DATA FETCH
+# DATA FETCH - VERSIONE CORRETTA
 # -------------------------
 @st.cache_data(ttl=3600)
 def fetch_all_data(symbols, start, end):
     try:
-        data = yf.download(symbols, start=start, end=end, group_by='ticker', progress=False)
+        # Scarica i dati in modo diverso per gestire MultiIndex
+        data = yf.download(symbols, start=start, end=end, group_by='ticker', progress=False, threads=True)
         return data
     except Exception as e:
         st.error(f"Errore fetch dati: {e}")
@@ -47,6 +48,7 @@ def fetch_all_data(symbols, start, end):
 # HEIKIN ASHI
 # -------------------------
 def heikin_ashi(df):
+    """Calcola le candele Heikin Ashi da un DataFrame OHLC"""
     ha = df.copy()
     
     # Calcola HA_Close
@@ -61,6 +63,9 @@ def heikin_ashi(df):
     ha['HA_High'] = ha[['High', 'HA_Open', 'HA_Close']].max(axis=1)
     ha['HA_Low'] = ha[['Low', 'HA_Open', 'HA_Close']].min(axis=1)
     
+    # Aggiungi colonna colore
+    ha['Is_Green'] = ha['HA_Close'] > ha['HA_Open']
+    
     return ha
 
 # -------------------------
@@ -68,33 +73,47 @@ def heikin_ashi(df):
 # -------------------------
 def analyze_stock(symbol, all_data):
     try:
-        df = all_data[symbol].copy()
-    except KeyError:
+        # Estrai i dati per il singolo simbolo dal MultiIndex
+        if isinstance(all_data.columns, pd.MultiIndex):
+            # Se abbiamo MultiIndex (download multiplo)
+            df = all_data.xs(symbol, axis=1, level=0).copy()
+        else:
+            # Se abbiamo un singolo simbolo
+            df = all_data.copy()
+    except Exception as e:
+        st.warning(f"Errore estrazione dati per {symbol}: {e}")
         return None
     
     if df.empty or len(df) < 4:
         return None
     
+    # Verifica che abbiamo le colonne necessarie
+    required_columns = ['Open', 'High', 'Low', 'Close']
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        st.warning(f"{symbol}: Manca colonne {missing_cols}")
+        return None
+    
     # Converti in Heikin Ashi
     ha = heikin_ashi(df)
     
-    # Aggiungi colonne colore e data
-    ha['Is_Green'] = ha['HA_Close'] > ha['HA_Open']
-    ha['Date'] = ha.index
-    
-    # Prendi solo i giorni di trading (rimuovi NaN)
+    # Prendi solo i giorni con dati validi
     ha = ha.dropna(subset=['HA_Close', 'HA_Open'])
     
     if len(ha) < 3:
         return None
     
-    # Ottieni le ultime 3 candele con date valide
+    # Prendi le ultime 3 candele
     recent = ha.tail(3).copy()
     
-    # Ordina per data (più recente per ultimo)
+    # Ordina per data (assicurati che sia cronologico)
     recent = recent.sort_index()
     
-    # Debug: mostra le ultime candele per il simbolo corrente
+    # Estrai le candele di interesse
+    yesterday = recent.iloc[-1]
+    day_before = recent.iloc[-2]
+    
+    # DEBUG: informazioni per verifica
     debug_info = {
         'symbol': symbol,
         'dates': recent.index.strftime('%Y-%m-%d').tolist(),
@@ -102,18 +121,6 @@ def analyze_stock(symbol, all_data):
         'ha_open': recent['HA_Open'].round(4).tolist(),
         'ha_close': recent['HA_Close'].round(4).tolist()
     }
-    
-    # Verifica che abbiamo almeno 3 giorni
-    if len(recent) < 3:
-        return None
-    
-    # La più recente (ieri) è in posizione -1
-    # La seconda più recente (altro ieri) è in posizione -2
-    yesterday = recent.iloc[-1]
-    day_before = recent.iloc[-2]
-    
-    # DEBUG: Visualizza per verificare
-    st.session_state.setdefault('debug_data', []).append(debug_info)
     
     # Condizione: ieri verde, altro ieri rosso
     condition_met = (yesterday['Is_Green'] == True) and (day_before['Is_Green'] == False)
@@ -127,126 +134,174 @@ def analyze_stock(symbol, all_data):
     return None
 
 # -------------------------
-# RUN SCREENER
+# MAIN APP
 # -------------------------
-# Prendiamo più dati per assicurarci di avere almeno 3 giorni di trading
+
+# Data range
 end = date.today() + timedelta(days=1)
 start = end - timedelta(days=30)  # 30 giorni per sicurezza
 
-with st.spinner("Analisi in corso..."):
-    all_data = fetch_all_data(SYMBOLS, start, end)
-    results = []
-    
-    if all_data is not None:
-        for s in SYMBOLS:
-            r = analyze_stock(s, all_data)
-            if r:
-                results.append(r)
+# Aggiungi opzione per testare singolo simbolo
+test_mode = st.checkbox("Modalità Test (analizza solo primo simbolo)")
 
-# -------------------------
-# RISULTATI
-# -------------------------
-if results:
-    st.success(f"✅ Trovati {len(results)} titoli")
-    
-    # Mostra tabella risultati
-    df_results = pd.DataFrame({
-        "Simbolo": [r["symbol"] for r in results],
-        "Data Ieri": [r["debug"]["dates"][-1] for r in results],
-        "Data Altro Ieri": [r["debug"]["dates"][-2] for r in results],
-        "Colore Ieri": ["🟢 Verde" for r in results],
-        "Colore Altro Ieri": ["🔴 Rosso" for r in results]
-    })
-    
-    st.dataframe(df_results, use_container_width=True)
-    
-    # -------------------------
-    # SELEZIONE GRAFICO E DEBUG
-    # -------------------------
-    selected = st.selectbox("Seleziona un titolo per il grafico Heikin Ashi", df_results["Simbolo"])
-    selected_data = next(r for r in results if r["symbol"] == selected)
-    ha = selected_data["ha"].tail(30)
-    
-    # DEBUG: Mostra info delle candele
-    with st.expander(f"🔍 Debug per {selected}"):
-        debug_info = selected_data["debug"]
-        st.write(f"**Simbolo:** {debug_info['symbol']}")
-        st.write(f"**Date:** {debug_info['dates']}")
-        st.write(f"**Colore (True=verde):** {debug_info['is_green']}")
-        st.write(f"**HA Open:** {debug_info['ha_open']}")
-        st.write(f"**HA Close:** {debug_info['ha_close']}")
-        
-        # Verifica condizione
-        if len(debug_info['is_green']) >= 3:
-            cond1 = f"Ieri (pos. -1): {debug_info['dates'][-1]} - {'Verde' if debug_info['is_green'][-1] else 'Rosso'}"
-            cond2 = f"Altro ieri (pos. -2): {debug_info['dates'][-2]} - {'Verde' if debug_info['is_green'][-2] else 'Rosso'}"
-            st.write(f"**Condizione:** {cond1} | {cond2}")
-            st.write(f"**Pattern trovato:** {'✅ SÌ' if debug_info['is_green'][-1] and not debug_info['is_green'][-2] else '❌ NO'}")
-    
-    # Grafico
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=ha.index,
-        open=ha['HA_Open'],
-        high=ha['HA_High'],
-        low=ha['HA_Low'],
-        close=ha['HA_Close'],
-        increasing_line_color='green',
-        decreasing_line_color='red',
-        name="Heikin Ashi"
-    ))
-    
-    # Aggiungi volume se disponibile
-    if 'Volume' in ha.columns:
-        fig.add_trace(go.Bar(
-            x=ha.index,
-            y=ha['Volume'],
-            name="Volume",
-            marker_color='blue',
-            yaxis="y2",
-            opacity=0.3
-        ))
-    
-    # Evidenzia le 2 candele rilevanti
-    if len(ha) >= 2:
-        fig.add_vrect(
-            x0=ha.index[-2], x1=ha.index[-1],
-            fillcolor="rgba(255,255,0,0.1)",
-            layer="below",
-            line_width=0,
-            annotation_text="Pattern",
-            annotation_position="top left"
-        )
-    
-    fig.update_layout(
-        title=f"{selected} – Grafico Heikin Ashi (Ultimi 30 giorni)",
-        xaxis_title="Data",
-        yaxis_title="Prezzo",
-        yaxis2=dict(title='Volume', overlaying='y', side='right', showgrid=False),
-        height=600,
-        hovermode='x unified'
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
+if test_mode:
+    symbols_to_check = [SYMBOLS[0]]
+    st.info(f"Modalità test attiva - Analizzo solo: {symbols_to_check[0]}")
 else:
-    st.warning("❌ Nessun titolo soddisfa il pattern Heikin Ashi")
+    symbols_to_check = SYMBOLS
+
+with st.spinner("Analisi in corso..."):
+    all_data = fetch_all_data(symbols_to_check, start, end)
+    
+    if all_data is None:
+        st.error("Impossibile scaricare i dati. Verifica la connessione o i simboli.")
+    else:
+        # Mostra info sui dati scaricati
+        st.info(f"Dati scaricati: {all_data.shape[0]} giorni per {len(symbols_to_check)} simboli")
+        
+        # DEBUG: mostra struttura dati
+        with st.expander("📊 Struttura dati scaricati"):
+            st.write(f"Colonne: {all_data.columns[:10]}")
+            st.write(f"Tipo colonne: {type(all_data.columns)}")
+            st.write(f"Prime righe:")
+            st.dataframe(all_data.head())
+        
+        results = []
+        
+        # Analizza ogni simbolo
+        for symbol in symbols_to_check:
+            with st.spinner(f"Analisi {symbol}..."):
+                result = analyze_stock(symbol, all_data)
+                if result:
+                    results.append(result)
+        
+        # Mostra risultati
+        if results:
+            st.success(f"✅ Trovati {len(results)} titoli")
+            
+            # Crea tabella risultati
+            results_data = []
+            for r in results:
+                debug = r["debug"]
+                if len(debug['dates']) >= 2:
+                    results_data.append({
+                        "Simbolo": r["symbol"],
+                        "Data Ieri": debug['dates'][-1],
+                        "Data Altro Ieri": debug['dates'][-2],
+                        "Ieri": "🟢 Verde" if debug['is_green'][-1] else "🔴 Rosso",
+                        "Altro Ieri": "🟢 Verde" if debug['is_green'][-2] else "🔴 Rosso",
+                        "Pattern": "✅ SÌ" if debug['is_green'][-1] and not debug['is_green'][-2] else "❌ NO"
+                    })
+            
+            if results_data:
+                df_results = pd.DataFrame(results_data)
+                st.dataframe(df_results, use_container_width=True)
+                
+                # -------------------------
+                # SELEZIONE GRAFICO
+                # -------------------------
+                if not test_mode:  # Solo se non in modalità test
+                    selected = st.selectbox(
+                        "Seleziona un titolo per il grafico Heikin Ashi",
+                        [r["symbol"] for r in results]
+                    )
+                    
+                    selected_data = next(r for r in results if r["symbol"] == selected)
+                    ha = selected_data["ha"].tail(30)
+                    
+                    # Mostra info debug
+                    with st.expander(f"🔍 Dettagli per {selected}"):
+                        debug_info = selected_data["debug"]
+                        st.write(f"**Simbolo:** {debug_info['symbol']}")
+                        st.write(f"**Date:** {debug_info['dates']}")
+                        st.write(f"**Verde?:** {debug_info['is_green']}")
+                        st.write(f"**HA Open:** {debug_info['ha_open']}")
+                        st.write(f"**HA Close:** {debug_info['ha_close']}")
+                        
+                        # Tabella chiara
+                        summary_df = pd.DataFrame({
+                            'Data': debug_info['dates'],
+                            'HA Open': debug_info['ha_open'],
+                            'HA Close': debug_info['ha_close'],
+                            'Colore': ['🟢' if g else '🔴' for g in debug_info['is_green']]
+                        })
+                        st.dataframe(summary_df)
+                    
+                    # Grafico
+                    fig = go.Figure()
+                    
+                    # Candele Heikin Ashi
+                    fig.add_trace(go.Candlestick(
+                        x=ha.index,
+                        open=ha['HA_Open'],
+                        high=ha['HA_High'],
+                        low=ha['HA_Low'],
+                        close=ha['HA_Close'],
+                        increasing_line_color='green',
+                        decreasing_line_color='red',
+                        name="Heikin Ashi"
+                    ))
+                    
+                    # Evidenzia le 2 candele del pattern
+                    if len(ha) >= 2:
+                        # Rettangolo evidenziato
+                        fig.add_vrect(
+                            x0=ha.index[-2], x1=ha.index[-1],
+                            fillcolor="rgba(255,255,0,0.1)",
+                            layer="below",
+                            line_width=0
+                        )
+                        
+                        # Annotazioni
+                        fig.add_annotation(
+                            x=ha.index[-2],
+                            y=ha['HA_High'].iloc[-2],
+                            text="Altro ieri 🔴",
+                            showarrow=True,
+                            arrowhead=2
+                        )
+                        
+                        fig.add_annotation(
+                            x=ha.index[-1],
+                            y=ha['HA_Low'].iloc[-1],
+                            text="Ieri 🟢",
+                            showarrow=True,
+                            arrowhead=2
+                        )
+                    
+                    fig.update_layout(
+                        title=f"{selected} – Heikin Ashi (Ultimi 30 giorni)",
+                        xaxis_title="Data",
+                        yaxis_title="Prezzo",
+                        height=600,
+                        hovermode='x unified'
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("❌ Nessun titolo soddisfa il pattern Heikin Ashi")
 
 # -------------------------
 # INFO
 # -------------------------
-with st.expander("ℹ️ Logica del Pattern"):
+with st.expander("ℹ️ Informazioni sul Pattern"):
     st.markdown("""
-    **Pattern di inversione Heikin Ashi**
-    - Candela rossa → perdita di momentum
-    - Candela verde successiva → possibile ripartenza
-    - Filtra rumore di mercato rispetto alle candele classiche
+    ### Pattern di inversione Heikin Ashi
     
-    **Condizione specifica:**
-    1. 🔴 **Altro ieri**: Candela Heikin Ashi ROSSA (Close < Open)
-    2. 🟢 **Ieri**: Candela Heikin Ashi VERDE (Close > Open)
+    **Logica:**
+    - 🔴 **Altro ieri**: Candela Heikin Ashi ROSSA (Close < Open) → Momentum negativo
+    - 🟢 **Ieri**: Candela Heikin Ashi VERDE (Close > Open) → Potenziale inversione
     
-    **Nota:** Lo script ora verifica esplicitamente le date e gestisce correttamente i giorni senza trading.
+    **Vantaggi Heikin Ashi:**
+    - Filtra il rumore del mercato
+    - Mostra trend più chiaramente
+    - Riduce i falsi segnali
+    
+    **Nota tecnica:**
+    - Lo script gestisce automaticamente i giorni senza trading
+    - Verifica le date effettive dei giorni di borsa
+    - Gestisce correttamente i dati multi-simbolo da Yahoo Finance
     """)
 
 st.markdown("---")
-st.caption("Dati Yahoo Finance • Analisi Heikin Ashi")
+st.caption("Dati Yahoo Finance • Analisi Heikin Ashi • Aggiornamento giornaliero")
