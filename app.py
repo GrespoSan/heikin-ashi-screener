@@ -69,9 +69,9 @@ def heikin_ashi(df):
     required_cols = ['Open', 'High', 'Low', 'Close']
 
     # Controlla se tutte le colonne esistono
-    for col in required_cols:
-        if col not in df.columns:
-            return None
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        return None  # ignora ticker senza colonne complete
 
     # Converte in numerico e rimuove righe con NaN
     df[required_cols] = df[required_cols].apply(pd.to_numeric, errors='coerce')
