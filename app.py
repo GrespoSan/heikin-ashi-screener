@@ -3,84 +3,85 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date, timedelta
+import numpy as np
 
 # -------------------------
 # CONFIG STREAMLIT
 # -------------------------
 st.set_page_config(
-    page_title="Heikin Ashi Screener ITA",
-    page_icon="📈",
+    page_title="Heikin Ashi Screener",
+    page_icon="📊",
     layout="wide"
 )
 
-st.title("📊 Screener Heikin Ashi – Titoli Italiani")
+st.title("📊 Screener Heikin Ashi – Inversione Rialzista")
+
 st.markdown("""
-**Pattern di ricerca:**  
-- 🔴 Heikin Ashi **altro ieri rossa**  
+**Condizione di ricerca**
+- 🔴 Heikin Ashi **altro ieri rossa**
 - 🟢 Heikin Ashi **ieri verde**
 """)
 
 # -------------------------
-# SIMBOLI DEFAULT ITALIA
+# DEFAULT SYMBOLS ITALIA
 # -------------------------
-DEFAULT_SYMBOLS = [
-    "A2A.MI", "AMP.MI", "BAMI.MI", "BC.MI", "BGN.MI", "BMPS.MI", "BPE.MI",
-    "BMED.MI", "BST.MI", "CE.MI", "CPR.MI", "DIA.MI", "ENEL.MI", "ENI.MI",
-    "ERG.MI", "FBK.MI", "GEO.MI", "IG.MI", "INRG.MI", "ISP.MI", "IVG.MI",
-    "LDO.MI", "MB.MI", "MONC.MI", "NEXI.MI", "PRY.MI", "PST.MI", "RACE.MI",
-    "REC.MI", "SFER.MI", "SPM.MI", "STLAM.MI", "STMMI.MI", "TES.MI", "TEN.MI",
+SYMBOLS = [
+    "A2A.MI", "AMP.MI", "BAMI.MI", "BC.MI", "BGN.MI", "BMPS.MI", "BPE.MI", 
+    "BMED.MI", "BST.MI", "CE.MI", "CPR.MI", "DIA.MI", "ENEL.MI", "ENI.MI", 
+    "ERG.MI", "FBK.MI", "GEO.MI", "IG.MI", "INRG.MI", "ISP.MI", "IVG.MI", 
+    "LDO.MI", "MB.MI", "MONC.MI", "NEXI.MI", "PRY.MI", "PST.MI", "RACE.MI", 
+    "REC.MI", "SFER.MI", "SPM.MI", "STLAM.MI", "STMMI.MI", "TES.MI", "TEN.MI", 
     "TGYM.MI", "TIT.MI", "TRN.MI", "UCG.MI", "UNI.MI"
 ]
 
 # -------------------------
-# UPLOAD FILE OPZIONALE
+# DATA FETCH
 # -------------------------
-uploaded_file = st.file_uploader("Carica file TXT con simboli (uno per riga)", type=['txt'])
-if uploaded_file:
-    file_content = uploaded_file.read().decode('utf-8')
-    symbols = [s.strip().upper() for s in file_content.splitlines() if s.strip()]
-    st.sidebar.success(f"Caricati {len(symbols)} simboli dal file")
-else:
-    symbols = DEFAULT_SYMBOLS
-    st.sidebar.info(f"Analisi su {len(symbols)} simboli predefiniti")
+@st.cache_data(ttl=3600)
+def fetch_all_data(symbols, start, end):
+    try:
+        data = yf.download(symbols, start=start, end=end, group_by='ticker', progress=False)
+        return data
+    except Exception as e:
+        st.error(f"Errore fetch dati: {e}")
+        return None
 
 # -------------------------
-# CALCOLO HEIKIN ASHI
+# HEIKIN ASHI
 # -------------------------
 def heikin_ashi(df):
     df = df.copy()
+    # Assicuriamoci che siano numerici
+    for col in ['Open', 'High', 'Low', 'Close']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['Open','High','Low','Close'])
+
     df['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
     ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2]
     for i in range(1, len(df)):
         ha_open.append((ha_open[i-1] + df['HA_Close'].iloc[i-1]) / 2)
     df['HA_Open'] = ha_open
-    df['HA_High'] = df[['High', 'HA_Open', 'HA_Close']].max(axis=1)
-    df['HA_Low'] = df[['Low', 'HA_Open', 'HA_Close']].min(axis=1)
+
+    df['HA_High'] = df[['High','HA_Open','HA_Close']].max(axis=1)
+    df['HA_Low'] = df[['Low','HA_Open','HA_Close']].min(axis=1)
     return df
 
 # -------------------------
-# FETCH DATI YFINANCE
+# ANALISI PATTERN
 # -------------------------
-@st.cache_data(ttl=3600)
-def fetch_data(symbol, start, end):
+def analyze_stock(symbol, all_data):
     try:
-        df = yf.download(symbol, start=start, end=end, progress=False)
-        if df.empty:
-            return None
-        return df
-    except:
+        df = all_data[symbol].copy()
+    except KeyError:
         return None
 
-# -------------------------
-# ANALISI INVERSIONE
-# -------------------------
-def analyze_stock(symbol, start, end):
-    df = fetch_data(symbol, start, end)
-    if df is None or len(df) < 3:
+    if df.empty or len(df) < 3:
         return None
+
     ha = heikin_ashi(df)
     yesterday = ha.iloc[-2]
     day_before = ha.iloc[-3]
+
     if yesterday['HA_Close'] > yesterday['HA_Open'] and day_before['HA_Close'] < day_before['HA_Open']:
         return {"symbol": symbol, "ha": ha}
     return None
@@ -91,12 +92,14 @@ def analyze_stock(symbol, start, end):
 end = date.today() + timedelta(days=1)
 start = end - timedelta(days=15)
 
-results = []
-with st.spinner(f"Analisi in corso per {len(symbols)} titoli..."):
-    for s in symbols:
-        r = analyze_stock(s, start, end)
-        if r:
-            results.append(r)
+with st.spinner("Analisi in corso..."):
+    all_data = fetch_all_data(SYMBOLS, start, end)
+    results = []
+    if all_data is not None:
+        for s in SYMBOLS:
+            r = analyze_stock(s, all_data)
+            if r:
+                results.append(r)
 
 # -------------------------
 # RISULTATI
@@ -157,4 +160,5 @@ with st.expander("ℹ️ Logica del Pattern"):
     - Filtra rumore di mercato rispetto alle candele classiche
     """)
 
+st.markdown("---")
 st.caption("Dati Yahoo Finance • Analisi Heikin Ashi")
