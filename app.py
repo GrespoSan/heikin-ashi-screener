@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from datetime import date, timedelta
 
 # -------------------------
-# Config pagina
+# Configurazione pagina
 # -------------------------
 st.set_page_config(
     page_title="Heikin Ashi Screener",
@@ -13,9 +13,14 @@ st.set_page_config(
     layout="wide"
 )
 st.title("📊 Screener Heikin Ashi – Inversione Rialzista")
+st.markdown("""
+**Condizione di ricerca**
+- 🔴 Heikin Ashi **altro ieri rossa**
+- 🟢 Heikin Ashi **ieri verde**
+""")
 
 # -------------------------
-# Sidebar: upload simboli
+# Sidebar: caricamento simboli
 # -------------------------
 st.sidebar.header("📁 Lista Simboli")
 uploaded_file = st.sidebar.file_uploader(
@@ -61,20 +66,17 @@ else:
 # Funzione Heikin Ashi sicura
 # -------------------------
 def heikin_ashi(df):
-    required_cols = ['Open','High','Low','Close']
-    
-    # Controlla colonne
-    if not all(col in df.columns for col in required_cols):
-        return None
+    required_cols = ['Open', 'High', 'Low', 'Close']
 
-    df = df.dropna(subset=required_cols)
-    if len(df) < 3:
-        return None
-
-    # Forza tipo numerico
+    # Controlla se tutte le colonne esistono
     for col in required_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+        if col not in df.columns:
+            return None
+
+    # Converte in numerico e rimuove righe con NaN
+    df[required_cols] = df[required_cols].apply(pd.to_numeric, errors='coerce')
     df = df.dropna(subset=required_cols)
+
     if len(df) < 3:
         return None
 
@@ -92,7 +94,7 @@ def heikin_ashi(df):
     return ha if not ha.empty else None
 
 # -------------------------
-# Fetch sicuro
+# Fetch sicuro dati da Yahoo
 # -------------------------
 @st.cache_data
 def fetch_stock_data(symbol, start, end):
@@ -123,7 +125,7 @@ def analyze_stock(symbol):
     return None
 
 # -------------------------
-# Run screener
+# Esegui screener
 # -------------------------
 with st.spinner("Analisi in corso..."):
     results = []
@@ -140,7 +142,6 @@ if results:
     df_results = pd.DataFrame({"Simbolo":[r["symbol"] for r in results]})
     st.dataframe(df_results, use_container_width=True)
 
-    # Grafico per selezione titolo
     selected = st.selectbox("Seleziona un titolo per il grafico Heikin Ashi", df_results["Simbolo"])
     selected_data = next(r for r in results if r["symbol"] == selected)
     ha = selected_data["ha"].tail(30)
