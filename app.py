@@ -3,17 +3,9 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date, timedelta
-import numpy as np
 
 # -------------------------
-# CONFIG STREAMLIT
-# -------------------------
-st.set_page_config(
-    page_title="Heikin Ashi Screener ITA",
-    page_icon="📈",
-    layout="wide"
-)
-
+st.set_page_config(page_title="Heikin Ashi Screener ITA", page_icon="📈", layout="wide")
 st.title("📊 Screener Heikin Ashi – Inversione Rialzista")
 st.markdown("""
 **Pattern di ricerca:**  
@@ -21,9 +13,6 @@ st.markdown("""
 - 🟢 Heikin Ashi **ieri verde**
 """)
 
-# -------------------------
-# SIMBOLI ITALIANI PREDEFINITI
-# -------------------------
 SYMBOLS = [
     "A2A.MI", "AMP.MI", "BAMI.MI", "BC.MI", "BGN.MI", "BMPS.MI", "BPE.MI", "BMED.MI",
     "BST.MI", "CE.MI", "CPR.MI", "DIA.MI", "ENEL.MI", "ENI.MI", "ERG.MI", "FBK.MI",
@@ -33,53 +22,48 @@ SYMBOLS = [
 ]
 
 # -------------------------
-# FUNZIONE HEIKIN ASHI
-# -------------------------
 def heikin_ashi(df):
-    required_cols = ['Open', 'High', 'Low', 'Close']
-    if not all(col in df.columns for col in required_cols):
+    if not all(col in df.columns for col in ['Open','High','Low','Close']):
         return None
 
-    df = df.sort_index()  # ordine cronologico
+    df = df.sort_index()
     ha = pd.DataFrame(index=df.index)
     ha['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
 
-    ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2]
-    for i in range(1, len(df)):
-        ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1]) / 2)
-
+    ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0])/2]
+    for i in range(1,len(df)):
+        ha_open.append((ha_open[i-1] + ha['HA_Close'].iloc[i-1])/2)
     ha['HA_Open'] = ha_open
-    ha['HA_High'] = ha[['High','HA_Open','HA_Close']].max(axis=1)
-    ha['HA_Low'] = ha[['Low','HA_Open','HA_Close']].min(axis=1)
+
+    ha['HA_High'] = ha[['HA_Open','HA_Close']].copy()
+    ha['HA_High'] = ha['HA_High'].join(df['High'])
+    ha['HA_High'] = ha[['HA_Open','HA_Close','High']].max(axis=1)
+
+    ha['HA_Low'] = ha[['HA_Open','HA_Close']].copy()
+    ha['HA_Low'] = ha['HA_Low'].join(df['Low'])
+    ha['HA_Low'] = ha[['HA_Open','HA_Close','Low']].min(axis=1)
+
     ha['Volume'] = df['Volume'] if 'Volume' in df.columns else 0
     return ha
 
 # -------------------------
-# FETCH DATI
-# -------------------------
-@st.cache_data(ttl=3600)
-def fetch_all_data(symbols, start, end):
+def fetch_data(symbol, start, end):
     try:
-        data = yf.download(symbols, start=start, end=end, group_by='ticker', progress=False)
-        return data
-    except Exception as e:
-        st.error(f"Errore fetch dati: {e}")
+        df = yf.download(symbol, start=start, end=end, progress=False)
+        if df.empty:
+            return None
+        return df
+    except:
         return None
 
 # -------------------------
-# ANALISI PATTERN
-# -------------------------
-def analyze_stock(symbol, all_data):
-    try:
-        df = all_data[symbol].copy()
-    except KeyError:
-        return None
-
-    if df.empty or len(df) < 4:
+def analyze_stock(symbol, start, end):
+    df = fetch_data(symbol, start, end)
+    if df is None or len(df)<3:
         return None
 
     ha = heikin_ashi(df)
-    if ha is None or len(ha) < 3:
+    if ha is None or len(ha)<3:
         return None
 
     yesterday = ha.iloc[-2]
@@ -90,31 +74,25 @@ def analyze_stock(symbol, all_data):
     return None
 
 # -------------------------
-# RUN SCREENER
-# -------------------------
+start = date.today() - timedelta(days=15)
 end = date.today() + timedelta(days=1)
-start = end - timedelta(days=15)
 
+results = []
 with st.spinner("Analisi in corso..."):
-    all_data = fetch_all_data(SYMBOLS, start, end)
-    results = []
-    if all_data is not None:
-        for s in SYMBOLS:
-            r = analyze_stock(s, all_data)
-            if r:
-                results.append(r)
+    for s in SYMBOLS:
+        r = analyze_stock(s, start, end)
+        if r:
+            results.append(r)
 
-# -------------------------
-# RISULTATI
 # -------------------------
 if results:
-    st.success(f"✅ Trovati {len(results)} titoli con inversione rialzista")
-    df_results = pd.DataFrame({"Simbolo": [r["symbol"] for r in results]})
+    st.success(f"✅ Trovati {len(results)} titoli")
+    df_results = pd.DataFrame({"Simbolo":[r['symbol'] for r in results]})
     st.dataframe(df_results, use_container_width=True)
 
     selected = st.selectbox("Seleziona un titolo per il grafico Heikin Ashi", df_results["Simbolo"])
-    selected_data = next(r for r in results if r["symbol"] == selected)
-    ha = selected_data["ha"].tail(30)
+    selected_data = next(r for r in results if r['symbol']==selected)
+    ha = selected_data['ha'].tail(30)
 
     fig = go.Figure()
     fig.add_trace(go.Candlestick(
@@ -125,31 +103,27 @@ if results:
         close=ha['HA_Close'],
         increasing_line_color='green',
         decreasing_line_color='red',
-        name="Heikin Ashi"
+        name='Heikin Ashi'
     ))
 
     if 'Volume' in ha.columns:
         fig.add_trace(go.Bar(
             x=ha.index,
             y=ha['Volume'],
-            name="Volume",
+            name='Volume',
             marker_color='blue',
-            yaxis="y2",
+            yaxis='y2',
             opacity=0.3
         ))
 
     fig.update_layout(
         title=f"{selected} – Grafico Heikin Ashi",
-        xaxis_title="Data",
-        yaxis_title="Prezzo",
+        xaxis_title='Data',
+        yaxis_title='Prezzo',
         yaxis2=dict(title='Volume', overlaying='y', side='right', showgrid=False),
         height=600,
         hovermode='x unified'
     )
     st.plotly_chart(fig, use_container_width=True)
-
 else:
-    st.warning("❌ Nessun titolo soddisfa il pattern Heikin Ashi")
-
-st.markdown("---")
-st.caption("Dati Yahoo Finance • Analisi Heikin Ashi")
+    st.warning("❌ Nessun titolo soddisfa il pattern")
